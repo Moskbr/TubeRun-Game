@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/TubeRun.dir/src/main.cpp.o CMakeFiles/TubeRun.dir/src/game.cpp.o CMakeFiles/TubeRun.dir/src/renderer.cpp.o CMakeFiles/TubeRun.dir/src/camera.cpp.o -o TubeRun  /usr/lib/x86_64-linux-gnu/libSDL2.so /usr/lib/x86_64-linux-gnu/libSDL2main.a libglad.a /usr/lib/x86_64-linux-gnu/libGL.so 
