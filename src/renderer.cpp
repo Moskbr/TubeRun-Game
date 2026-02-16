@@ -18,20 +18,29 @@ layout (location = 0) in vec3 aPos;
 
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform mat4 uModel;
 
 void main()
 {
-    gl_Position = uProjection * uView * vec4(aPos, 1.0);
+    gl_Position = uProjection * uView * uModel * vec4(aPos, 1.0);
 }
 )";
 
 
 static const char* fragmentSrc = R"(
 #version 330 core
+
 out vec4 FragColor;
+
+uniform float uIntensity;
+
 void main()
 {
-    FragColor = vec4(1.0, 0.3, 0.3, 1.0);
+    vec3 base  = vec3(0.1);
+    vec3 alert = vec3(0.2, 0.8, 1.0);
+
+    vec3 color = mix(base, alert, uIntensity);
+    FragColor = vec4(color, 1.0);
 }
 )";
 
@@ -130,6 +139,7 @@ bool Renderer::init(SDL_Window* win)
         100.0f                    // far
     );
 
+
     return true;
 }
 
@@ -160,27 +170,78 @@ void Renderer::shutdown()
 
 }
 
-void Renderer::render(const Camera& camera)
+void Renderer::render(const Camera& camera, const Object3D& object, const CubeMesh& mesh)
 {
     glUseProgram(shaderProgram);
 
-    GLint viewLoc = glGetUniformLocation(shaderProgram, "uView");
-    GLint projLoc = glGetUniformLocation(shaderProgram, "uProjection");
+    GLint modelLoc = glGetUniformLocation(shaderProgram, "uModel");
+    GLint viewLoc  = glGetUniformLocation(shaderProgram, "uView");
+    GLint projLoc  = glGetUniformLocation(shaderProgram, "uProjection");
 
     glUniformMatrix4fv(
-        viewLoc,
-        1,
-        GL_FALSE,
-        &camera.getViewMatrix()[0][0]
+        modelLoc, 1, GL_FALSE, &object.getModelMatrix()[0][0]
     );
 
     glUniformMatrix4fv(
-        projLoc,
-        1,
-        GL_FALSE,
-        &projection[0][0]
+        viewLoc, 1, GL_FALSE, &camera.getViewMatrix()[0][0]
     );
 
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glUniformMatrix4fv(
+        projLoc, 1, GL_FALSE, &projection[0][0]
+    );
+
+    GLint intenLoc = glGetUniformLocation(shaderProgram, "uIntensity");
+    glUniform1f(intenLoc, 1.0f);
+
+
+    mesh.draw();
 }
+
+void Renderer::renderTube(const Camera& camera,
+                          const TubeGrid& tube,
+                          const QuadMesh& quad)
+{
+    glUseProgram(shaderProgram);
+
+    GLint modelLoc = glGetUniformLocation(shaderProgram, "uModel");
+    GLint viewLoc  = glGetUniformLocation(shaderProgram, "uView");
+    GLint projLoc  = glGetUniformLocation(shaderProgram, "uProjection");
+    GLint intenLoc = glGetUniformLocation(shaderProgram, "uIntensity");
+
+    glUniformMatrix4fv(viewLoc, 1, GL_FALSE,
+        &camera.getViewMatrix()[0][0]);
+
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE,
+        &projection[0][0]);
+
+    for (const auto& cell : tube.getCells())
+    {
+        glm::mat4 model(1.0f);
+
+        // posição
+        model = glm::translate(model, cell.position);
+
+        // Eixos locais do quad
+        glm::vec3 normal = glm::normalize(cell.normal);
+        glm::vec3 forward = glm::vec3(0, 0, -1); // eixo do tubo
+        glm::vec3 right = glm::normalize(glm::cross(forward, normal));
+        glm::vec3 up = glm::cross(normal, right);
+
+        // Matriz de rotação explícita
+        glm::mat4 rotation(1.0f);
+        rotation[0] = glm::vec4(right, 0.0f);
+        rotation[1] = glm::vec4(up,    0.0f);
+        rotation[2] = glm::vec4(normal,0.0f);
+
+        model *= rotation;
+
+        // tamanho do quadrado
+        model = glm::scale(model, glm::vec3(0.9f));
+
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
+        glUniform1f(intenLoc, cell.intensity);
+
+        quad.draw();
+    }
+}
+

@@ -2,6 +2,10 @@
 #include <SDL2/SDL.h>
 #include "camera.hpp"
 #include "renderer.hpp"
+#include <memory>
+#include "cubemesh.hpp"
+#include "obstacle.hpp"
+
 
 class Game {
     bool running;
@@ -14,12 +18,14 @@ class Game {
 
     Camera camera;
     Renderer renderer;
+    Obstacle obstacle;
+    std::unique_ptr<CubeMesh> cube;
+    glm::mat4 obstacleModel;
 
     void processInput();
     void update(float deltaTime);
     void render();
-
-    public:
+public:
     Game();
     ~Game();
     bool init();

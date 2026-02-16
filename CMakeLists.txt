@@ -14,6 +14,10 @@ add_executable(TubeRun
     src/game.cpp
     src/renderer.cpp
     src/camera.cpp
+    src/object3d.cpp
+    src/cubemesh.cpp
+    src/tubegrid.cpp
+    src/quadmesh.cpp
 )
 
 target_include_directories(TubeRun PRIVATE src)
