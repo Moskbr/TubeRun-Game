@@ -1,4 +1,0 @@
-/home/luiz/Documentos/game/TubeRun-Game/build/CMakeFiles/TubeRun.dir
-/home/luiz/Documentos/game/TubeRun-Game/build/CMakeFiles/glad.dir
-/home/luiz/Documentos/game/TubeRun-Game/build/CMakeFiles/edit_cache.dir
-/home/luiz/Documentos/game/TubeRun-Game/build/CMakeFiles/rebuild_cache.dir
