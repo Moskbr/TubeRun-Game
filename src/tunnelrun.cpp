@@ -59,7 +59,7 @@ void sampleSpline (const std::vector<glm::vec3>& cp, int samplesPerSegment,
     centers.clear();
     tangents.clear();
 
-    for (int i=0; i < count - 3; i++)
+    for (int i=0; i < count - 3; i++) {
         for (int j=0; j < samplesPerSegment; j++) {
             
             float t = (float)j / (float)samplesPerSegment;
@@ -71,6 +71,16 @@ void sampleSpline (const std::vector<glm::vec3>& cp, int samplesPerSegment,
             centers.push_back(pos);
             tangents.push_back(tan);
         }
+
+        if (i == count - 4) {
+            glm::vec3 pos    = catmullRom(cp[i], cp[i+1], cp[i+2], cp[i+3], 1.0f);
+            glm::vec3 rawTan = catmullRomTangent(cp[i], cp[i+1], cp[i+2], cp[i+3], 1.0f);
+            glm::vec3 tan    = (glm::length(rawTan) > 0.0001f)
+                                   ? glm::normalize(rawTan) : glm::vec3(0,0,1);
+            centers.push_back(pos);
+            tangents.push_back(tan);
+        }
+    }
 }
 
 // Parallel Transform Frames
@@ -124,8 +134,8 @@ void computeFrames (const std::vector<glm::vec3>& tangents, std::vector<glm::qua
             dq = glm::rotation(Tprev, Tcurr); // obtain the quaternion for the minimum rotation from Tprev to Tcurr
         }
         Q[i] = glm::normalize(dq * Q[i-1]); // sum this rotation to the "memory of the curve", for smoothness
-        N[i] = glm::normalize(Q[i] * N[0]); // apply the result on the initial normal and binormal
-        B[i] = glm::normalize(Q[i] * B[0]);
+        N[i] = glm::normalize(Q[i] * N[i-1]); // apply the result on the initial normal and binormal
+        B[i] = glm::normalize(Q[i] * B[i-1]);
     }
 }
 
@@ -260,10 +270,11 @@ int main()
 
     // Spline
     std::vector<glm::vec3> controlPoints = {
-        {0,0,0}, {0,0,10}, {5,0,20}, {5,5,30}, {0,10,40}, {-5,5,50}, {0,0,60}
+        //{0,0,0}, {0,0,10}, {5,0,20}, {5,5,30}, {0,10,40}, {-5,5,50}, {0,0,60}
+        {0,0,0}, {0,0,15}, {8,0,30}, {8,6,50}, {0,10,70}, {-8,6,90}, {0,0,110}
     };
     std::vector<glm::vec3> centers, tangents;
-    sampleSpline(controlPoints, 20, centers, tangents); // samplesPerSegment = 20
+    sampleSpline(controlPoints, 40, centers, tangents); // samplesPerSegment = 20 -> 40
 
     // Compute Quaternion
     std::vector<glm::quat> Q;
