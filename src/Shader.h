@@ -14,6 +14,29 @@ class Shader
 {
 public:
     unsigned int ID;
+
+    void openShaderFile(std::ifstream& file, const char* path) const
+    {
+        file.open(path);
+        if (file.is_open()) return;
+
+        std::string pathStr(path);
+        size_t pos = pathStr.find_last_of("/\\");
+        std::string filename = (pos == std::string::npos) ? pathStr : pathStr.substr(pos + 1);
+
+        if (!filename.empty() && filename != pathStr) {
+            file.clear();
+            file.open(filename.c_str());
+            if (file.is_open()) return;
+        }
+
+        if (!filename.empty()) {
+            file.clear();
+            std::string srcPath = std::string("src/") + filename;
+            file.open(srcPath.c_str());
+        }
+    }
+
     // constructor generates the shader on the fly
     // ------------------------------------------------------------------------
     Shader(const char* vertexPath, const char* fragmentPath)
@@ -23,14 +46,15 @@ public:
         std::string fragmentCode;
         std::ifstream vShaderFile;
         std::ifstream fShaderFile;
-        // ensure ifstream objects can throw exceptions:
-        vShaderFile.exceptions (std::ifstream::failbit | std::ifstream::badbit);
-        fShaderFile.exceptions (std::ifstream::failbit | std::ifstream::badbit);
         try 
         {
-            // open files
-            vShaderFile.open(vertexPath);
-            fShaderFile.open(fragmentPath);
+            openShaderFile(vShaderFile, vertexPath);
+            openShaderFile(fShaderFile, fragmentPath);
+
+            if (!vShaderFile.is_open() || !fShaderFile.is_open()) {
+                throw std::ifstream::failure("Could not open shader file");
+            }
+
             std::stringstream vShaderStream, fShaderStream;
             // read file's buffer contents into streams
             vShaderStream << vShaderFile.rdbuf();
@@ -45,6 +69,7 @@ public:
         catch (std::ifstream::failure& e)
         {
             std::cout << "ERROR::SHADER::FILE_NOT_SUCCESSFULLY_READ: " << e.what() << std::endl;
+            throw std::runtime_error("Failed to read shader source files");
         }
         const char* vShaderCode = vertexCode.c_str();
         const char * fShaderCode = fragmentCode.c_str();

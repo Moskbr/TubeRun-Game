@@ -22,35 +22,16 @@ struct Vertex {
 struct Player {
     float t = 0.0f;  // progress in spline
     float speed = 0.0f;
-    float maxSpeed = 20.0f;
-    float acceleration = 2.5f;
+    float maxSpeed = 10.0f;
+    float acceleration = 1.5f;
     float angle = 0.0f;   // angular position in tunnel
     float angularSpeed = 2.5f;
-    
-    // SCORING AND COLLISION SYSTEM
-    int score = 0;                      // total points earned
-    int distanceTraveled = 0;           // distance in units (used to calculate score)
-    bool isColliding = false;           // flag to prevent multiple collision penalties
 };
 
 struct Obstacle {
     glm::vec3 center;
     glm::quat orientation;
-    int segmentIndex;
 };
-
-// COLLISION DETECTION - Simple sphere-to-box approximation
-// Checks if player (represented as a sphere at playerPos with radius 0.2f) collides with any obstacle
-bool checkCollision(const glm::vec3& playerPos, const std::vector<Obstacle>& obstacles, float playerRadius = 0.2f) {
-    for (const auto& obstacle : obstacles) {
-        float distance = glm::distance(playerPos, obstacle.center);
-        // Obstacle is a 0.5f-scaled cube, approximate collision radius is playerRadius + 0.35f
-        if (distance < playerRadius + 0.35f) {
-            return true;  // collision detected
-        }
-    }
-    return false;  // no collision
-}
 
 glm::vec3 catmullRom (glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t)
 {
@@ -109,13 +90,6 @@ void sampleSpline (const std::vector<glm::vec3>& cp, int samplesPerSegment,
     }
 }
 
-// PROCEDURAL CONTROL POINT GENERATION
-// Strategy: Instead of using fixed control points, we generate them dynamically with relative offsets.
-// This prevents the tunnel from spiraling infinitely and creates natural-looking curves.
-// The X and Y offsets are applied incrementally to the previous point (not reset each iteration).
-// This ensures smooth, continuous curves without sudden direction changes.
-// The maxOffset acts as a boundary clamp, preventing the tunnel from drifting too far off-axis.
-// Angle offsets are reduced for vertical (Y) movement to create mostly horizontal turns.
 std::vector<glm::vec3> generateControlPoints(int segmentCount, float segmentLength, float maxOffset, unsigned int seed)
 {
     std::mt19937 rng(seed);
@@ -140,40 +114,26 @@ std::vector<glm::vec3> generateControlPoints(int segmentCount, float segmentLeng
     return cp;
 }
 
-// PROCEDURAL OBSTACLE PLACEMENT
-// Strategy: Place cube obstacles randomly on the tunnel walls at specific spline positions.
-// The wall placement uses the tunnel's local frame (N, B vectors) to map a random angle on the circular cross-section.
-// Obstacles are pinned to the wall by:
-//   1) Computing the radial direction (N*cos(angle) + B*sin(angle))
-//   2) Finding the wall point at radius distance from the tunnel center
-//   3) Moving inward by half the cube depth so the cube face sits flush on the wall
-// Orientation: Each obstacle is rotated to face outward (perpendicular to wall) with a random roll around the radial axis.
-// To make obstacles face the camera (+Z), you need to modify the rotation quaternion computation (see below).
 std::vector<Obstacle> generateObstacles(int count, float radius, const std::vector<glm::vec3>& centers,
                                          const std::vector<glm::vec3>& N, const std::vector<glm::vec3>& B,
-                                         unsigned int seed, int minSpawnIndex = 4)
+                                         unsigned int seed)
 {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> distAngle(0.0f, 2.0f * glm::pi<float>());
-    //std::uniform_real_distribution<float> distRoll(0.0f, 2.0f * glm::pi<float>());
+    std::uniform_real_distribution<float> distRoll(0.0f, 2.0f * glm::pi<float>());
     std::vector<Obstacle> obstacles;
     obstacles.reserve(count);
 
     int sampleCount = static_cast<int>(centers.size());
     if (sampleCount < 8) return obstacles;
 
-    int firstIndex = std::clamp(minSpawnIndex, 4, sampleCount - 5);
-    std::vector<int> indices;
-    for (int i = firstIndex; i < sampleCount - 4; ++i)
-        indices.push_back(i);
-    if (indices.empty()) return obstacles;
+    std::vector<int> indices(sampleCount - 8);
+    for (int i = 0; i < sampleCount - 8; i++)
+        indices[i] = i + 4;
 
     std::shuffle(indices.begin(), indices.end(), rng);
 
-    // OBSTACLE SIZE AND POSITIONING
-    // Change obstacleSize to make obstacles larger/smaller (in world units, cube extends from -size/2 to +size/2)
-    // halfDepth controls how far into the wall the cube is buried; larger = more flush with wall
-    constexpr float obstacleSize = 0.4f;  // <-- MODIFY THIS to change obstacle size
+    constexpr float obstacleSize = 0.4f;
     const float halfDepth = obstacleSize * 0.5f;
 
     for (int i = 0; i < count && i < (int)indices.size(); i++) {
@@ -183,24 +143,11 @@ std::vector<Obstacle> generateObstacles(int count, float radius, const std::vect
         float s = sinf(angle);
         glm::vec3 radial = glm::normalize(N[sampleIndex] * c + B[sampleIndex] * s);
         glm::vec3 wallPoint = centers[sampleIndex] + radial * radius;
-        glm::vec3 inwardNormal = -radial;  // points into the tunnel (away from wall)
+        glm::vec3 inwardNormal = -radial;
 
         glm::vec3 center = wallPoint + inwardNormal * halfDepth;
-        
-        // OBSTACLE ORIENTATION - KEY SECTION FOR ROTATION CONTROL
-        // Current behavior: cube face points perpendicular to wall (inward)
-        // To make obstacle face toward camera (+Z direction), uncomment the alternative below:
         glm::quat orientation = glm::rotation(glm::vec3(0.0f, 0.0f, 1.0f), inwardNormal);
-        // Alternative: to make cube face camera direction, use:
-        // glm::quat orientation = glm::rotation(glm::vec3(0.0f, 0.0f, -1.0f), tangents[sampleIndex]);
-
-        // 90-degree rotation around inwardNormal to make cube face the player's camera direction (+Z)
-        orientation = glm::angleAxis(glm::pi<float>() * 0.5f, inwardNormal) * orientation;
-
-        // Apply random roll rotation around the wall normal (inward direction)
-        // This creates visual variation without changing the wall orientation
-        // <-- MODIFY distRoll range to change rotation variation (currently full 2π)
-        //orientation = glm::angleAxis(distRoll(rng), inwardNormal) * orientation;
+        orientation = glm::angleAxis(distRoll(rng), inwardNormal) * orientation;
 
         obstacles.push_back({center, orientation});
     }
@@ -208,14 +155,6 @@ std::vector<Obstacle> generateObstacles(int count, float radius, const std::vect
     return obstacles;
 }
 
-// IMPROVED FRAME CALCULATION FOR TUNNEL ROTATION
-// Strategy: Use Parallel Transport Frames (PTF) to smoothly orient the tunnel cross-section along the spline.
-// At each point, we compute a rotation (dq) that transforms the previous frame to align with the new tangent direction.
-// Three cases are handled:
-//   1) Parallel tangents (dot > 0.999): keep same frame orientation
-//   2) Opposite tangents (dot < -0.999): perform 180-degree rotation to avoid flipping
-//   3) General case: use glm::rotation() to find minimum-angle quaternion between tangents
-// Applying dq to N and B directly (not through Q) prevents frame twist accumulation that caused spiraling.
 // Parallel Transform Frames
 void computeFrames (const std::vector<glm::vec3>& tangents, std::vector<glm::quat>& Q,
                         std::vector<glm::vec3>& N, std::vector<glm::vec3>& B)
@@ -350,30 +289,9 @@ glm::mat4 computePlayerCamera (float t, float playerAngle, float radius, std::ve
 
 void updatePlayer (Player& player, float deltaTime)
 {
-    player.speed += player.acceleration * deltaTime;
+    player.speed += player.acceleration * deltaTime; // progressive acceleration
     if (player.speed > player.maxSpeed) player.speed = player.maxSpeed;
-    player.t += player.speed * deltaTime;
-}
-
-void extendTunnelSegment(int& nextControlPointId, const unsigned int seed, float segmentLength, float maxOffset,
-                         std::vector<glm::vec3>& controlPoints, int pointsToAdd)
-{
-    // DYNAMIC CONTROL POINT GENERATION FOR INFINITE TUNNEL
-    // This function extends the control point list when the player approaches the tunnel end.
-    // Strategy: Use the same seeded RNG with nextControlPointId to ensure procedurally consistent generation.
-    // Each new control point is generated with relative offsets, maintaining smooth curves.
-    // nextControlPointId is incremented to ensure different random values for each new segment.
-    std::mt19937 rng(seed + nextControlPointId);
-    std::uniform_real_distribution<float> distX(-maxOffset * 0.45f, maxOffset * 0.45f);
-    std::uniform_real_distribution<float> distY(-maxOffset * 0.25f, maxOffset * 0.25f);
-    glm::vec3 current = controlPoints.back();
-    for (int i = 0; i < pointsToAdd; i++) {
-        current.z += segmentLength;
-        current.x = std::clamp(current.x + distX(rng), -maxOffset, maxOffset);
-        current.y = std::clamp(current.y + distY(rng), -maxOffset * 0.5f, maxOffset * 0.5f);
-        controlPoints.push_back(current);
-        nextControlPointId++;
-    }
+    player.t += player.speed * deltaTime; // advances on spline
 }
 
 // ---------------------------------- GAME CODE ------------------------------------
@@ -382,9 +300,6 @@ void processInput(GLFWwindow *window, Player& player, float deltaTime);
 // settings
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-const int SAMPLES_PER_SEGMENT = 40;
-const float TUNNEL_RADIUS = 1.0f;
-const int TUNNEL_SIDES = 32;
 
 int main()
 {
@@ -413,32 +328,28 @@ int main()
     glEnable(GL_DEPTH_TEST);// enable depth in Z-Buffer
     glDisable(GL_CULL_FACE);
     
-    // Build Shader (use explicit src/ path to ensure file is found at runtime)
-    Shader shader("src/tunnel.vs", "src/tunnel.fs");
+    // Build Shader
+    Shader shader("tunnel.vs", "tunnel.fs");
 
-    // Spline - infinite tunnel setup
+    // Spline
     unsigned int seed = static_cast<unsigned int>(glfwGetTime() * 1000.0f);
-    const float CONTROL_POINT_LENGTH = 15.0f;
-    const float CONTROL_POINT_OFFSET = 8.0f;
-    std::vector<glm::vec3> controlPoints = generateControlPoints(20, CONTROL_POINT_LENGTH, CONTROL_POINT_OFFSET, seed);
-    int nextControlPointId = 20;
-    
+    std::vector<glm::vec3> controlPoints = generateControlPoints(20, 15.0f, 8.0f, seed);
     std::vector<glm::vec3> centers, tangents;
+    sampleSpline(controlPoints, 40, centers, tangents); // samplesPerSegment = 20 -> 40
+
+    // Compute Quaternion
     std::vector<glm::quat> Q;
     std::vector<glm::vec3> N, B;
+    computeFrames(tangents, Q, N, B);
+
+    // Make Tunnel
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
-    std::vector<Obstacle> obstaclePositions;
-    
-    auto regenerateTunnel = [&](int minSpawnIndex) {
-        sampleSpline(controlPoints, SAMPLES_PER_SEGMENT, centers, tangents);
-        computeFrames(tangents, Q, N, B);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        generateTunnel(TUNNEL_RADIUS, TUNNEL_SIDES, centers, Q, vertices, indices, N, B);
-        obstaclePositions = generateObstacles(12, TUNNEL_RADIUS, centers, N, B, seed + nextControlPointId, minSpawnIndex);
-    };
-    
-    regenerateTunnel(4);
+    float radius = 2.0f;
+    int segments = 32;
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    generateTunnel(radius, segments, centers, Q, vertices, indices, N, B);
+    std::vector<Obstacle> obstaclePositions = generateObstacles(12, radius, centers, N, B, seed + 1);
 
     // OpenGL Buffers
     unsigned int VAO, VBO, EBO;
@@ -449,24 +360,25 @@ int main()
     glGenBuffers(1, &EBO);
     glGenVertexArrays(1, &cubeVAO);
     glGenBuffers(1, &cubeVBO);
-    
-    auto updateTunnelBuffer = [&]() {
-        glBindVertexArray(VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size()*sizeof(unsigned int), indices.data(), GL_DYNAMIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, uv));
-        glEnableVertexAttribArray(2);
-        glBindVertexArray(0);
-    };
-    
-    updateTunnelBuffer();
+    // pass the vertices data to GPU for the tunnel mesh
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO); // GL_STATIC_DRAW indicates that data is modified once and drawn many times -> VRAM
+    glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+    // set up indices as element buffer, the order of the vertices to be drawn
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size()*sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+    // position: layout=0, vec3, float, normalized already, stride = for each Vertex, starting from the first
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    // normal: layout=1, vec3, float, normalized already, stride = for each Vertex, starting from the first offset
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
+    glEnableVertexAttribArray(1);
+    // uv: layout=2, vec2, float, normalized already, stride = for each Vertex, starting from the first offset
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, uv));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
 
     // create a simple cube to use as an obstacle
     const float cubeVertices[] = {
@@ -534,7 +446,7 @@ int main()
     Player player;
     glm::vec3 cameraPos;
     // timing
-    float deltaTime = 0.0f;
+    float deltaTime = 0.0f;	// time between current frame and last frame
     float lastFrame = 0.0f;
 
     while (!glfwWindowShouldClose(window))
@@ -548,76 +460,9 @@ int main()
         processInput(window, player, deltaTime);
         // player movement
         updatePlayer(player, deltaTime);
-        
-        // COLLISION DETECTION AND SCORING SYSTEM
-        // Calculate player's 3D position in the tunnel to check for collisions
-        // Player moves in a circular pattern around the tunnel center based on 'angle'
-        if ((int)player.t < (int)centers.size()) {
-            int idx = (int)player.t;
-            int nextIdx = std::min(idx + 1, (int)centers.size() - 1);
-            float localT = player.t - idx;
-            
-            // Interpolate player position along tunnel
-            glm::vec3 center = glm::mix(centers[idx], centers[nextIdx], localT);
-            glm::vec3 Nf = glm::normalize(glm::mix(N[idx], N[nextIdx], localT));
-            glm::vec3 Bf = glm::normalize(glm::mix(B[idx], B[nextIdx], localT));
-            
-            // Calculate player position based on circular movement around tunnel center
-            float offsetGround = 0.2f;
-            float x = cos(player.angle) * (TUNNEL_RADIUS - offsetGround);
-            float y = sin(player.angle) * (TUNNEL_RADIUS - offsetGround);
-            glm::vec3 playerPos = center + Nf*x + Bf*y;
-            
-            // CHECK FOR COLLISION WITH OBSTACLES
-            // If collision is detected and player isn't already in collision state:
-            // - Deduct 100 points (but don't go below 0)
-            // - Set speed to 0 (player must use arrow keys to escape)
-            // - Set collision flag to prevent multiple penalties per collision
-            if (checkCollision(playerPos, obstaclePositions, 0.2f)) {
-                if (!player.isColliding) {
-                    player.score = std::max(0, player.score - 100);  // Penalty for hitting obstacle
-                    player.speed = 0.0f;  // Stop player movement
-                    player.isColliding = true;  // Mark collision state
-                    std::cout << "Collision! Score: " << player.score << std::endl;
-                }
-            } else {
-                // No collision - clear collision flag to allow next collision penalty
-                player.isColliding = false;
-            }
-        }
-        
-        // UPDATE SCORE BASED ON DISTANCE TRAVELED
-        // Each unit of progress along the spline adds to the score
-        int newDistance = (int)player.t;
-        if (newDistance > player.distanceTraveled) {
-            int distanceDelta = newDistance - player.distanceTraveled;
-            player.score += distanceDelta;  // Add points equal to distance traveled
-            player.distanceTraveled = newDistance;
-            std::cout << "Score: " << player.score << std::endl;
-        }
-        
-        // INFINITE TUNNEL EXTENSION LOGIC
-        // When player.t approaches the end of the generated tunnel, new control points are created.
-        // This prevents the game from restarting and creates the illusion of an endless tunnel.
-        // The lookahead distance (SAMPLES_PER_SEGMENT * 8) determines when to generate new segments.
-        // Larger values = more preprocessing, smoother experience but higher CPU cost.
-        // Smaller values = lower latency but potential stuttering if generation takes too long.
-        if (player.t + SAMPLES_PER_SEGMENT * 8 > (int)centers.size() - 20) {
-            extendTunnelSegment(nextControlPointId, seed, CONTROL_POINT_LENGTH, CONTROL_POINT_OFFSET,
-                              controlPoints, 3);  // add 3 new control points
-            int spawnAhead = std::max(4, std::min((int)player.t + SAMPLES_PER_SEGMENT * 2, (int)centers.size() - 8));
-            regenerateTunnel(spawnAhead);     // resample spline and regenerate obstacles ahead of the player
-            updateTunnelBuffer();   // update GPU buffers with new geometry
-        }
-        
-        // Safety clamp: ensure player position stays within valid tunnel range
-        // This prevents out-of-bounds access if generation lags
-        if (player.t >= (int)centers.size() - 5) {
-            player.t = (int)centers.size() - 6;
-        }
-        
+        if (player.t >= centers.size() - 1) player.t = 0.0f; // Temporary: restart******
         // camera view
-        glm::mat4 view = computePlayerCamera(player.t,player.angle,TUNNEL_RADIUS,centers,tangents,Q,cameraPos,N,B);
+        glm::mat4 view = computePlayerCamera(player.t,player.angle,radius,centers,tangents,Q,cameraPos,N,B);
         
         // render
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -634,20 +479,12 @@ int main()
         glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
 
         glBindVertexArray(cubeVAO);
-        // OBSTACLE RENDERING WITH DYNAMIC TRANSFORMATION
-        // Each obstacle is rendered with its pre-computed position and orientation from generateObstacles().
-        // Transform pipeline:
-        //   1) glm::translate(): move obstacle to its wall position
-        //   2) glm::mat4_cast(): apply the stored quaternion rotation (face orientation)
-        //   3) glm::scale(): scale by 0.4f in all dimensions (uniform scaling)
-        // OBSTACLE SIZE MODIFICATION: Change the scale factor (0.4f) to make obstacles larger/smaller
-        // OBSTACLE ROTATION MODIFICATION: See generateObstacles() function (~line 145) for rotation logic
         for (const auto& obstacle : obstaclePositions) {
             model = glm::translate(glm::mat4(1.0f), obstacle.center);
             model *= glm::mat4_cast(obstacle.orientation);
-            model = glm::scale(model, glm::vec3(0.5f));  // <-- MODIFY THIS to change size (try 0.3f, 0.5f, etc)
+            model = glm::scale(model, glm::vec3(0.4f));
             shader.setMat4("model", model);
-            glDrawArrays(GL_TRIANGLES, 0, 36);  // 36 = 6 faces * 6 vertices per face
+            glDrawArrays(GL_TRIANGLES, 0, 36);
         }
 
         glfwSwapBuffers(window);
